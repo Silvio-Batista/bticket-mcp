@@ -18,10 +18,21 @@ Todas as ferramentas da v1 são **somente leitura**.
 
 `bticket_list_my_open_cards` **prefere** `board_uuid`. Sem o UUID, lista os quadros e agrega até 8 boards — isso é mais pesado e deve ser evitado no dia a dia.
 
+## Host de produção
+
+A API B-Ticket em produção é **`https://bticket.brediweb.com.br`** (sem barra no final). As rotas Laravel ficam em `/api`, por exemplo:
+
+```text
+POST https://bticket.brediweb.com.br/api/user/login
+GET  https://bticket.brediweb.com.br/api/user
+```
+
+Use esse valor em `BTICKET_API_URL`. Não coloque e-mail, senha nem token no git — só placeholders em `.env.example`.
+
 ## Requisitos
 
 - Node.js 18+
-- Uma instância B-Ticket acessível via HTTPS
+- Acesso HTTPS à API B-Ticket (`https://bticket.brediweb.com.br` em produção)
 - Credenciais Sanctum **ou** um token de longa duração
 
 ## Setup
@@ -37,14 +48,14 @@ npm run build
 Edite `.env` (nunca commite este arquivo):
 
 ```env
-BTICKET_API_URL=https://seu-host-bticket.example.com
+BTICKET_API_URL=https://bticket.brediweb.com.br
 BTICKET_EMAIL=voce@empresa.com
 BTICKET_PASSWORD=sua-senha
 BTICKET_TOKEN=
 PORT=3000
 ```
 
-- `BTICKET_API_URL` é a origem **sem** `/api` no final. As chamadas vão para `{BTICKET_API_URL}/api/...`.
+- `BTICKET_API_URL` é a origem **sem** barra final e **sem** `/api`. As chamadas vão para `{BTICKET_API_URL}/api/...` (produção: `https://bticket.brediweb.com.br/api/user/login`).
 - Se `BTICKET_TOKEN` estiver preenchido, o login é ignorado e o token é usado em `Authorization: Bearer …`.
 - Sem token, o servidor faz `POST /api/user/login` com `{ email, password }`, lê `results.token` (Sanctum `plainTextToken`) e guarda o valor **em memória** até o processo reiniciar. Em `401` subsequente, tenta um novo login (somente quando o token não veio de `BTICKET_TOKEN`).
 
@@ -70,7 +81,7 @@ PORT=3000
       "command": "node",
       "args": ["/caminho/absoluto/bticket-mcp/dist/index.js"],
       "env": {
-        "BTICKET_API_URL": "https://seu-host-bticket.example.com",
+        "BTICKET_API_URL": "https://bticket.brediweb.com.br",
         "BTICKET_EMAIL": "voce@empresa.com",
         "BTICKET_PASSWORD": "sua-senha"
       }
@@ -88,7 +99,7 @@ Equivalente com token estático:
       "command": "node",
       "args": ["/caminho/absoluto/bticket-mcp/dist/index.js"],
       "env": {
-        "BTICKET_API_URL": "https://seu-host-bticket.example.com",
+        "BTICKET_API_URL": "https://bticket.brediweb.com.br",
         "BTICKET_TOKEN": "1|seu-token-sanctum"
       }
     }

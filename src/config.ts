@@ -22,7 +22,9 @@ function optional(name: string): string | undefined {
 export function loadConfig(): BticketConfig {
   const apiUrl = optional("BTICKET_API_URL");
   if (!apiUrl) {
-    throw new Error("BTICKET_API_URL is required (ex.: https://api.example.com)");
+    throw new Error(
+      "BTICKET_API_URL is required (ex.: https://bticket.brediweb.com.br)",
+    );
   }
 
   const portRaw = optional("PORT") ?? "3000";
