@@ -10,7 +10,7 @@ export class BticketApiError extends Error {
   }
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
+export function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;
   }
@@ -110,22 +110,75 @@ export function extractUserId(payload: unknown): string | undefined {
   return undefined;
 }
 
-export function extractBoardUuids(payload: unknown): string[] {
+export function extractArray(payload: unknown): unknown[] {
   const results = extractResults(payload);
-  const list = Array.isArray(results)
-    ? results
-    : Array.isArray(asRecord(results)?.data)
-      ? (asRecord(results)?.data as unknown[])
-      : [];
+  if (Array.isArray(results)) {
+    return results;
+  }
+  const record = asRecord(results);
+  if (Array.isArray(record?.data)) {
+    return record.data;
+  }
+  if (Array.isArray(record?.results)) {
+    return record.results;
+  }
+  return [];
+}
 
-  return list
-    .map((item) => {
-      const record = asRecord(item);
-      if (!record) {
-        return undefined;
+export type NamedBoard = {
+  uuid: string;
+  titulo: string;
+};
+
+export function extractBoards(payload: unknown): NamedBoard[] {
+  const results = extractResults(payload);
+  const roots = Array.isArray(results) ? results : extractArray(payload);
+  const boards: NamedBoard[] = [];
+  const seen = new Set<string>();
+
+  const visit = (item: unknown): void => {
+    const record = asRecord(item);
+    if (!record) {
+      return;
+    }
+
+    const uuidCandidate = record.uuid ?? record.id;
+    const tituloCandidate = record.titulo ?? record.nome;
+    if (typeof uuidCandidate === "string" && uuidCandidate.trim()) {
+      const uuid = uuidCandidate.trim();
+      if (!seen.has(uuid)) {
+        seen.add(uuid);
+        boards.push({
+          uuid,
+          titulo: typeof tituloCandidate === "string" ? tituloCandidate : "",
+        });
       }
-      const id = record.uuid ?? record.id;
-      return typeof id === "string" && id.trim() ? id.trim() : undefined;
-    })
-    .filter((id): id is string => Boolean(id));
+    }
+
+    if (Array.isArray(record.quadros)) {
+      for (const nested of record.quadros) {
+        visit(nested);
+      }
+    }
+  };
+
+  for (const item of roots) {
+    visit(item);
+  }
+
+  return boards;
+}
+
+export function extractBoardUuids(payload: unknown): string[] {
+  return extractBoards(payload).map((board) => board.uuid);
+}
+
+export function extractCardUuid(payload: unknown): string | undefined {
+  const results = extractResults(payload);
+  const record = asRecord(results);
+  if (!record) {
+    return undefined;
+  }
+  const id = record.uuid ?? record.id;
+  return typeof id === "string" && id.trim() ? id.trim() : undefined;
 }

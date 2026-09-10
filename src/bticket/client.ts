@@ -97,8 +97,60 @@ export class BticketClient {
     return this.request("GET", "/notificacoes/contagem");
   }
 
+  async listColumns(boardUuid: string): Promise<unknown> {
+    return this.request("GET", `/quadro/${encodeURIComponent(boardUuid)}/colunas`);
+  }
+
+  async listProjects(query: { page?: number; per_page?: number; cliente_id?: string } = {}): Promise<unknown> {
+    return this.request("GET", "/projetos", {
+      query: {
+        page: query.page ?? 1,
+        per_page: query.per_page ?? 200,
+        por_pagina: query.per_page ?? 200,
+        cliente_id: query.cliente_id,
+      },
+    });
+  }
+
+  async createCard(
+    boardUuid: string,
+    colunaId: string | number,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.request(
+      "POST",
+      `/quadro/${encodeURIComponent(boardUuid)}/coluna/${encodeURIComponent(String(colunaId))}/card`,
+      { body },
+    );
+  }
+
+  async updateCard(
+    boardUuid: string,
+    colunaId: string | number,
+    cardUuid: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.request(
+      "PUT",
+      `/quadro/${encodeURIComponent(boardUuid)}/coluna/${encodeURIComponent(String(colunaId))}/card/${encodeURIComponent(cardUuid)}`,
+      { body },
+    );
+  }
+
+  async toggleCardMember(
+    boardUuid: string,
+    colunaId: string | number,
+    cardUuid: string,
+    userId: string | number,
+  ): Promise<unknown> {
+    return this.request(
+      "PATCH",
+      `/quadro/${encodeURIComponent(boardUuid)}/coluna/${encodeURIComponent(String(colunaId))}/card/${encodeURIComponent(cardUuid)}/membro/${encodeURIComponent(String(userId))}/toggle`,
+    );
+  }
+
   private async request(
-    method: "GET" | "POST",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     options: {
       query?: Record<string, string | string[] | number | boolean | undefined>;

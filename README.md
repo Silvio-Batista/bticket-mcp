@@ -1,8 +1,8 @@
 # bticket-mcp
 
-Servidor MCP fino que expõe a API Laravel Sanctum do [B-Ticket](https://github.com/brediweb/b-ticket-backend) como ferramentas de leitura. O Cursor (e o Grok Bot) passam a consultar usuário, quadros, cards, tickets, dashboard e notificações sem inventar rotas.
+Servidor MCP fino que expõe a API Laravel Sanctum do [B-Ticket](https://github.com/brediweb/b-ticket-backend) como ferramentas. O Cursor (e o Grok Bot) passam a consultar usuário, quadros, cards, tickets, dashboard e notificações — e também **criar card com horas** — sem inventar rotas.
 
-Todas as ferramentas da v1 são **somente leitura**.
+A maior parte das tools é **somente leitura**. `bticket_create_card` é a tool de escrita: cria o card, lança horas e se atribui ao card.
 
 ## O que este servidor faz
 
@@ -15,6 +15,9 @@ Todas as ferramentas da v1 são **somente leitura**.
 | `bticket_list_tickets` | `GET /api/tickets` |
 | `bticket_dashboard_stats` | `GET /api/dashboard/estatisticas` e `GET /api/dashboard/relatorio-diario-equipe` |
 | `bticket_list_notifications` | `GET /api/notificacoes` e `GET /api/notificacoes/contagem` |
+| `bticket_list_projects` | `GET /api/projetos` |
+| `bticket_list_columns` | `GET /api/quadro/{uuid}/colunas` |
+| `bticket_create_card` | `POST .../coluna/{id}/card` + `PUT` horas + `PATCH` membro |
 
 `bticket_list_my_open_cards` **prefere** `board_uuid`. Sem o UUID, lista os quadros e agrega até 8 boards — isso é mais pesado e deve ser evitado no dia a dia.
 
@@ -107,7 +110,7 @@ Equivalente com token estático:
 }
 ```
 
-Reinicie o MCP no Cursor. Em **Output → MCP Logs** você deve ver a sessão stdio e as 7 tools.
+Reinicie o MCP no Cursor. Em **Output → MCP Logs** você deve ver a sessão stdio e as 10 tools.
 
 Não use `console.log` no processo stdio: stdout é o protocolo MCP. Logs vão para stderr.
 
@@ -178,7 +181,24 @@ npm test
 npm run build
 ```
 
-O smoke sobe um HTTP mock no estilo `apiResponse` do B-Ticket, valida login + cache de token, paths reais e as 7 tools via transporte in-memory do SDK.
+O smoke sobe um HTTP mock no estilo `apiResponse` do B-Ticket, valida login + cache de token, paths reais, as tools de leitura e a criação de card (horas + membro) via transporte in-memory do SDK.
+
+## Criar card e lançar horas
+
+Use `bticket_create_card` no final de uma missão, por exemplo:
+
+> faça isso na tarefa X, projeto Sistema Secretaria, e depois crie um card para registrar 2 horas e o que foi feito
+
+A tool resolve quadro/projeto/coluna **por nome**. Campos principais:
+
+- `titulo` — obrigatório
+- `descricao` — texto puro (sem HTML) com o pedido e o que foi feito
+- `qtd_horas` — lança na API via `PUT` `qtd_horas` (não manda hora no POST de criação)
+- `projeto` ou `projeto_id`
+- `board_uuid` ou `board` (se só existir um quadro, usa ele)
+- `coluna` ou `coluna_id` — se houver horas e a coluna não for informada, cai em **Concluído**
+
+`atribuir_a_mim` vem ligado por padrão.
 
 ## Segurança
 

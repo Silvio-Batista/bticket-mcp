@@ -4,7 +4,7 @@ import { after, before, describe, it } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { BticketClient } from "./bticket/client.js";
-import { BticketApiError, extractToken } from "./bticket/errors.js";
+import { BticketApiError, extractBoardUuids, extractToken } from "./bticket/errors.js";
 import { createMcpServer } from "./server.js";
 
 type Incoming = http.IncomingMessage & { url?: string };
@@ -136,6 +136,72 @@ function startMockApi(): Promise<{
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/quadro/board-uuid-1/colunas") {
+      send(res, 200, {
+        error: false,
+        results: [
+          { id: 6, titulo: "Desenvolvimento" },
+          { id: 12, titulo: "Concluído / Publicado" },
+        ],
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/projetos") {
+      send(res, 200, {
+        error: false,
+        results: {
+          data: [
+            {
+              id: 88,
+              nome: "Sistema Secretaria",
+              cliente: "Paysandu",
+              cliente_id: 15,
+              status: "Iniciado",
+            },
+          ],
+        },
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/quadro/board-uuid-1/coluna/12/card") {
+      const body = (await readJson(req)) as { titulo?: string; qtd_horas?: unknown };
+      send(res, 201, {
+        error: false,
+        messages: ["Card criado com sucesso."],
+        results: {
+          id: "new-card-uuid",
+          titulo: body.titulo,
+          coluna_id: 12,
+          qtd_horas_no_create: body.qtd_horas ?? null,
+        },
+      });
+      return;
+    }
+
+    if (
+      req.method === "PUT" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/new-card-uuid"
+    ) {
+      const body = (await readJson(req)) as { qtd_horas?: number };
+      send(res, 200, {
+        error: false,
+        messages: ["Card atualizado com sucesso."],
+        results: { id: "new-card-uuid", qtd_horas: body.qtd_horas },
+      });
+      return;
+    }
+
+    if (
+      req.method === "PATCH" &&
+      url.pathname ===
+        "/api/quadro/board-uuid-1/coluna/12/card/new-card-uuid/membro/42/toggle"
+    ) {
+      send(res, 200, { error: false, messages: ["Sucesso!"], results: { id: "new-card-uuid" } });
+      return;
+    }
+
     send(res, 404, { message: "Not found" });
   });
 
@@ -174,6 +240,20 @@ describe("bticket-mcp smoke", () => {
       results: { token: "1|abc", plainTextToken: undefined },
     });
     assert.equal(token, "1|abc");
+  });
+
+  it("flattens nested board areas from GET /quadros", () => {
+    const uuids = extractBoardUuids({
+      error: false,
+      results: [
+        {
+          id: 18,
+          nome: "Silvio",
+          quadros: [{ id: "board-uuid-1", titulo: "Kanban" }],
+        },
+      ],
+    });
+    assert.deepEqual(uuids, ["board-uuid-1"]);
   });
 
   it("logs in once, caches the token, and hits the real API paths", async () => {
@@ -264,11 +344,14 @@ describe("bticket-mcp smoke", () => {
     const listed = await mcpClient.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      "bticket_create_card",
       "bticket_dashboard_stats",
       "bticket_list_boards",
       "bticket_list_cards",
+      "bticket_list_columns",
       "bticket_list_my_open_cards",
       "bticket_list_notifications",
+      "bticket_list_projects",
       "bticket_list_tickets",
       "bticket_whoami",
     ]);
@@ -292,6 +375,29 @@ describe("bticket-mcp smoke", () => {
       arguments: {},
     });
     assert.match(JSON.stringify(notifications), /nao_lidas/);
+
+    const created = await mcpClient.callTool({
+      name: "bticket_create_card",
+      arguments: {
+        board_uuid: "board-uuid-1",
+        titulo: "Registrar horas da missão",
+        descricao: "Ajustei a importação de atletas e o histórico de condições.",
+        projeto: "Secretaria",
+        qtd_horas: 2,
+      },
+    });
+    const createdText = JSON.stringify(created);
+    assert.equal(created.isError ?? false, false);
+    assert.match(createdText, /new-card-uuid/);
+    assert.match(createdText, /Sistema Secretaria/);
+    assert.match(createdText, /Concluído \/ Publicado/);
+    assert.ok(mock.calls.includes("POST /api/quadro/board-uuid-1/coluna/12/card"));
+    assert.ok(mock.calls.includes("PUT /api/quadro/board-uuid-1/coluna/12/card/new-card-uuid"));
+    assert.ok(
+      mock.calls.includes(
+        "PATCH /api/quadro/board-uuid-1/coluna/12/card/new-card-uuid/membro/42/toggle",
+      ),
+    );
 
     await mcpClient.close();
     await server.close();

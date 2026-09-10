@@ -4,12 +4,21 @@ import { BticketClient } from "./bticket/client.js";
 import {
   BticketApiError,
   extractBoardUuids,
+  extractCardUuid,
   extractUserId,
 } from "./bticket/errors.js";
+import {
+  boardsFromPayload,
+  pickBoard,
+  pickByName,
+  pickColumn,
+  columnsFromPayload,
+  projectsFromPayload,
+} from "./bticket/resolve.js";
 import type { CardFilters } from "./bticket/types.js";
 
 export const SERVER_NAME = "bticket-mcp";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.1.0";
 
 const booleanish = z
   .union([z.boolean(), z.enum(["true", "false", "1", "0"])])
@@ -114,6 +123,13 @@ const readOnly = {
   readOnlyHint: true,
   destructiveHint: false,
   idempotentHint: true,
+  openWorldHint: true,
+} as const;
+
+const writeOnce = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
   openWorldHint: true,
 } as const;
 
@@ -323,6 +339,201 @@ export function createMcpServer(client: BticketClient): McpServer {
         }
         const unread_count = await client.notificationCount();
         return jsonResult({ unread_count, notifications });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "bticket_list_projects",
+    {
+      title: "Listar projetos",
+      description:
+        "Lista projetos (GET /api/projetos). Use para resolver o nome do projeto antes de criar um card. Filtro opcional `busca` é aplicado localmente no nome/cliente.",
+      inputSchema: z.object({
+        busca: z.string().optional().describe("Filtro textual no nome do projeto ou cliente"),
+        cliente_id: z.string().optional().describe("Filtrar pelo id numérico do cliente"),
+        per_page: z.number().int().min(1).max(500).optional(),
+        page: z.number().int().min(1).optional(),
+      }),
+      annotations: readOnly,
+    },
+    async (args) => {
+      try {
+        const payload = await client.listProjects({
+          page: args.page,
+          per_page: args.per_page,
+          cliente_id: args.cliente_id,
+        });
+        const projects = projectsFromPayload(payload);
+        const busca = args.busca?.trim();
+        const filtered = busca
+          ? projects.filter((item) => {
+              const haystack = `${item.titulo} ${String(item.extra?.cliente ?? "")}`;
+              return haystack.toLowerCase().includes(busca.toLowerCase());
+            })
+          : projects;
+        return jsonResult({ total: filtered.length, projetos: filtered });
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "bticket_list_columns",
+    {
+      title: "Listar colunas do quadro",
+      description:
+        "Lista as colunas de um quadro (GET /api/quadro/{uuid}/colunas), ex.: Desenvolvimento, Aguardando QA, Concluído / Publicado.",
+      inputSchema: z.object({
+        board_uuid: z.string().min(1).describe("UUID do quadro"),
+      }),
+      annotations: readOnly,
+    },
+    async (args) => {
+      try {
+        return jsonResult(await client.listColumns(args.board_uuid));
+      } catch (error) {
+        return errorResult(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "bticket_create_card",
+    {
+      title: "Criar card e registrar horas",
+      description:
+        "Cria um card no B-Ticket para registrar o que foi feito e as horas trabalhadas. Aceita projeto/quadro/coluna por nome (não precisa do id). Fluxo: POST /coluna/{id}/card, opcionalmente PUT com qtd_horas e PATCH para se atribuir ao card. Descrição em texto puro, sem HTML. Se informar qtd_horas e não passar coluna, usa a coluna de Concluído.",
+      inputSchema: z.object({
+        titulo: z.string().min(1).describe("Título do card"),
+        descricao: z
+          .string()
+          .optional()
+          .describe("O que foi pedido e o que foi feito, em texto puro (sem HTML)"),
+        qtd_horas: z
+          .coerce
+          .number()
+          .positive()
+          .optional()
+          .describe("Horas trabalhadas. Lançadas depois da criação via PUT qtd_horas"),
+        board_uuid: z.string().optional().describe("UUID do quadro. Preferível se já conhecido"),
+        board: z.string().optional().describe("Nome do quadro, se não passar board_uuid"),
+        projeto_id: z.string().optional().describe("Id numérico do projeto"),
+        projeto: z.string().optional().describe("Nome do projeto, ex.: Sistema Secretaria"),
+        cliente_id: z.string().optional().describe("Id numérico do cliente. Se omitido, herda do projeto"),
+        coluna_id: z.string().optional().describe("Id numérico da coluna"),
+        coluna: z
+          .string()
+          .optional()
+          .describe("Nome da coluna. Default: Concluído se houver horas, senão Desenvolvimento"),
+        data_prazo: z.string().optional().describe("YYYY-MM-DD"),
+        atribuir_a_mim: booleanish.describe("true (default) atribui o usuário autenticado ao card"),
+      }),
+      annotations: writeOnce,
+    },
+    async (args) => {
+      try {
+        const boardsPayload = await client.listBoards();
+        const board = pickBoard(boardsFromPayload(boardsPayload), args.board_uuid, args.board);
+
+        const columnsPayload = await client.listColumns(board.id);
+        const column = pickColumn(
+          columnsFromPayload(columnsPayload),
+          args.coluna_id,
+          args.coluna,
+          Boolean(args.qtd_horas),
+        );
+
+        let projetoId = args.projeto_id;
+        let clienteId = args.cliente_id;
+        let projetoNome: string | undefined;
+
+        if (args.projeto || args.projeto_id) {
+          const projectsPayload = await client.listProjects({ per_page: 500, page: 1 });
+          const projects = projectsFromPayload(projectsPayload);
+
+          const chosen = args.projeto_id
+            ? projects.find((item) => item.id === String(args.projeto_id))
+            : pickByName(projects, args.projeto ?? "", "Projeto");
+
+          if (args.projeto_id && !chosen) {
+            throw new BticketApiError(
+              `Projeto id ${args.projeto_id} não encontrado. Use bticket_list_projects para buscar pelo nome.`,
+              404,
+              projects.slice(0, 20),
+            );
+          }
+
+          if (chosen) {
+            projetoId = chosen.id;
+            projetoNome = chosen.titulo;
+            if (!clienteId && chosen.extra?.cliente_id != null) {
+              clienteId = String(chosen.extra.cliente_id);
+            }
+          }
+        }
+
+        const createBody: Record<string, unknown> = {
+          titulo: args.titulo,
+        };
+        if (args.descricao !== undefined) {
+          createBody.descricao = args.descricao;
+        }
+        if (projetoId) {
+          createBody.projeto_id = Number(projetoId) || projetoId;
+        }
+        if (clienteId) {
+          createBody.cliente_id = Number(clienteId) || clienteId;
+        }
+        if (args.data_prazo) {
+          createBody.data_prazo = args.data_prazo;
+        }
+
+        const created = await client.createCard(board.id, column.id, createBody);
+        const cardUuid = extractCardUuid(created);
+        if (!cardUuid) {
+          throw new BticketApiError(
+            "Card criado, mas o UUID não veio na resposta.",
+            500,
+            created,
+          );
+        }
+
+        const warnings: string[] = [];
+        let horas: unknown;
+        let membro: unknown;
+
+        if (args.qtd_horas) {
+          horas = await client.updateCard(board.id, column.id, cardUuid, {
+            qtd_horas: args.qtd_horas,
+          });
+        }
+
+        if (args.atribuir_a_mim !== false) {
+          const me = await client.whoami();
+          const userId = extractUserId(me);
+          if (!userId) {
+            warnings.push("Não foi possível obter o id do usuário para se atribuir ao card.");
+          } else {
+            membro = await client.toggleCardMember(board.id, column.id, cardUuid, userId);
+          }
+        }
+
+        return jsonResult({
+          ok: true,
+          board: { uuid: board.id, titulo: board.titulo },
+          coluna: { id: column.id, titulo: column.titulo },
+          projeto: projetoId ? { id: projetoId, nome: projetoNome } : null,
+          card_uuid: cardUuid,
+          qtd_horas: args.qtd_horas ?? null,
+          warnings,
+          created,
+          horas: horas ?? null,
+          membro: membro ?? null,
+        });
       } catch (error) {
         return errorResult(error);
       }
