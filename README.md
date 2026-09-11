@@ -60,12 +60,11 @@ Use esse valor em `BTICKET_API_URL`. Não coloque e-mail, senha nem token no git
 ```bash
 git clone https://github.com/Silvio-Batista/bticket-mcp.git
 cd bticket-mcp
-cp .env.example .env
 npm install
 npm run build
 ```
 
-Edite `.env` (nunca commite este arquivo):
+Credenciais **não** vão no git. No Cursor elas entram no `env` do `mcp.json` (veja [Cursor (MCP)](#cursor-mcp)). Para `npm start` / `npm run start:http`, copie `.env.example` → `.env` com os mesmos campos:
 
 ```env
 BTICKET_API_URL=https://bticket.brediweb.com.br
@@ -83,23 +82,25 @@ PORT=3000
 
 | Script | Uso |
 | --- | --- |
-| `npm run build` | Compila TypeScript para `dist/` |
-| `npm start` | Transporte **stdio** (Cursor local) |
+| `npm run build` | Compila TypeScript para `dist/` (obrigatório antes de usar no Cursor) |
+| `npm start` | Transporte **stdio** — o mesmo que o Cursor chama |
 | `npm run start:http` | Transporte **Streamable HTTP** (`/mcp`) + SSE legado (`/sse`) |
 | `npm run dev` | HTTP com reload (`tsx watch`) |
 | `npm test` | Smoke test com API Laravel mockada |
 
-## Uso local (stdio) no Cursor
+## Cursor (MCP)
 
-1. Copie `.env` e rode `npm run build`.
-2. Em **Cursor Settings → MCP** (ou `~/.cursor/mcp.json` / `.cursor/mcp.json`):
+O padrão único é **stdio via `dist/index.js`**. Sempre o mesmo `mcpServers.bticket`: `command` + `args` + `cwd` + `env`. Depois de mudar o código, rode `npm run build` e reinicie o MCP.
+
+Em **Cursor Settings → MCP** ou `~/.cursor/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "bticket": {
       "command": "node",
-      "args": ["/caminho/absoluto/bticket-mcp/dist/index.js"],
+      "args": ["C:\\laragon\\www\\bticket-mcp\\dist\\index.js"],
+      "cwd": "C:\\laragon\\www\\bticket-mcp",
       "env": {
         "BTICKET_API_URL": "https://bticket.brediweb.com.br",
         "BTICKET_EMAIL": "voce@empresa.com",
@@ -110,58 +111,28 @@ PORT=3000
 }
 ```
 
-Equivalente com token estático:
+Ajuste `args` e `cwd` para o caminho absoluto deste repositório. Não use `url` nem SSE neste fluxo.
 
-```json
-{
-  "mcpServers": {
-    "bticket": {
-      "command": "node",
-      "args": ["/caminho/absoluto/bticket-mcp/dist/index.js"],
-      "env": {
-        "BTICKET_API_URL": "https://bticket.brediweb.com.br",
-        "BTICKET_TOKEN": "1|seu-token-sanctum"
-      }
-    }
-  }
-}
-```
+No mesmo `env`, em vez de e-mail/senha, pode ir só `BTICKET_TOKEN` (`1|seu-token-sanctum`). Não misture os dois modos: ou credenciais de login, ou token.
 
-Reinicie o MCP no Cursor. Em **Output → MCP Logs** você deve ver a sessão stdio e as tools `bticket_*` (leitura + operação completa do card).
+Reinicie o MCP. Em **Output → MCP Logs** deve aparecer `bticket-mcp 1.2.0 stdio` e as tools `bticket_*`.
 
 Não use `console.log` no processo stdio: stdout é o protocolo MCP. Logs vão para stderr.
 
 ## Deploy como MCP remoto (HTTPS)
 
-O modo HTTP sobe:
-
-- `GET /health` — liveness
-- `POST|GET|DELETE /mcp` — **Streamable HTTP** (transporte atual, use esta URL no Cursor)
-- `GET /sse` + `POST /messages?sessionId=` — SSE legado (clientes antigos)
+Mesmo servidor, outro transporte. As credenciais ficam no `.env` do host (não no `mcp.json`). Suba com:
 
 ```bash
 npm run build
 npm run start:http
 ```
 
-O servidor escuta em `0.0.0.0:$PORT` (default `3000`). Coloque-o atrás de HTTPS (Railway, Render, Fly, Nginx, Cloudflare Tunnel, etc.) com as variáveis de ambiente acima. O processo autentica **na API B-Ticket**, não no cliente MCP: as credenciais ficam só no host.
+- `GET /health` — liveness
+- `POST|GET|DELETE /mcp` — Streamable HTTP
+- `GET /sse` + `POST /messages?sessionId=` — SSE legado
 
-URL pública esperada:
-
-```text
-https://seu-mcp.example.com/mcp
-```
-
-Health check:
-
-```bash
-curl https://seu-mcp.example.com/health
-```
-
-### Conectar no Cursor (Add MCP Server / URL)
-
-1. Publique o serviço com HTTPS.
-2. Cursor → **Settings → MCP → Add new MCP server** (ou edite `mcp.json`):
+O processo escuta em `0.0.0.0:$PORT` (default `3000`), atrás de HTTPS. O bloco no Cursor continua `mcpServers.bticket`, só troca `command`/`args`/`cwd`/`env` por `url`:
 
 ```json
 {
@@ -173,10 +144,7 @@ curl https://seu-mcp.example.com/health
 }
 ```
 
-3. Se o cliente só falar SSE antigo, use `https://seu-mcp.example.com/sse`.
-4. Ative o servidor e confirme as tools `bticket_*`.
-
-O Grok Bot / Cloud Agent usa o mesmo URL HTTPS. Não coloque senha no `mcp.json` remoto: o MCP já autentica na API com o `.env` do host.
+Health check: `curl https://seu-mcp.example.com/health`. Grok Bot / Cloud Agent usa a mesma URL.
 
 ## Filtros de cards
 
@@ -239,5 +207,6 @@ O card **não** tem `repositorio_id`. O vínculo GitHub é no **projeto** (`POST
 ## Segurança
 
 - `.env` está no `.gitignore`. Só `.env.example` com placeholders entra no git.
+- No Cursor, as credenciais ficam só no `env` de `mcpServers.bticket` (ou `BTICKET_TOKEN` no mesmo objeto).
 - Prefira `BTICKET_TOKEN` de escopo limitado em produção.
 - Hoste o MCP remoto só em HTTPS e em rede confiável: quem chama o MCP herda o acesso B-Ticket daquele processo.
