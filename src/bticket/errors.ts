@@ -182,3 +182,44 @@ export function extractCardUuid(payload: unknown): string | undefined {
   const id = record.uuid ?? record.id;
   return typeof id === "string" && id.trim() ? id.trim() : undefined;
 }
+
+export type CardLocation = {
+  cardUuid: string;
+  boardUuid?: string;
+  colunaId?: string;
+};
+
+export function extractCardLocation(payload: unknown): CardLocation | undefined {
+  const results = extractResults(payload);
+  const record = asRecord(results);
+  if (!record) {
+    return undefined;
+  }
+
+  const id = record.uuid ?? record.id;
+  const cardUuid = typeof id === "string" && id.trim() ? id.trim() : undefined;
+  if (!cardUuid) {
+    return undefined;
+  }
+
+  const colunaRaw = record.coluna_id;
+  const colunaId =
+    typeof colunaRaw === "number" || typeof colunaRaw === "string"
+      ? String(colunaRaw)
+      : undefined;
+
+  const boardRaw = record.quadro_id;
+  const boardUuid =
+    typeof boardRaw === "string" && boardRaw.trim() ? boardRaw.trim() : undefined;
+
+  return { cardUuid, boardUuid, colunaId };
+}
+
+export function firstString(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}

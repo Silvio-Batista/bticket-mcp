@@ -15,6 +15,26 @@ export type CardFilters = {
   per_page?: number;
 };
 
+export type RepositoryFilters = {
+  q?: string;
+  cliente_id?: string;
+  projeto_id?: string;
+  language?: string;
+  topic?: string;
+  papel?: string;
+  vinculo?: string;
+  arquivado?: boolean;
+  ordenar?: string;
+  page?: number;
+  per_page?: number;
+};
+
+export type AttachmentFile = {
+  filename: string;
+  bytes: Uint8Array;
+  contentType?: string;
+};
+
 export type JsonValue =
   | string
   | number

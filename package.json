@@ -1,6 +1,6 @@
 {
   "name": "bticket-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Thin remote MCP server wrapping the B-Ticket Laravel Sanctum API",
   "type": "module",
   "main": "dist/index.js",

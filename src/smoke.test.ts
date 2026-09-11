@@ -202,6 +202,187 @@ function startMockApi(): Promise<{
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/quadro/board-uuid-1/card/card-1") {
+      send(res, 200, {
+        error: false,
+        results: {
+          id: "card-1",
+          quadro_id: "board-uuid-1",
+          coluna_id: 12,
+          titulo: "Corrigir login",
+          data_prazo: null,
+          checklists: [
+            { id: 3, titulo: "QA", itens: [{ id: 7, descricao: "Testar login", concluido: false }] },
+          ],
+          horas: [{ id: 9, horas: 2, user: "Ada" }],
+          anexos: [{ id: "anexo-uuid-1", nome: "print.png" }],
+          projeto: { id: 88, nome: "Sistema Secretaria" },
+        },
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/quadro/board-uuid-1/card/new-card-uuid") {
+      send(res, 200, {
+        error: false,
+        results: {
+          id: "new-card-uuid",
+          quadro_id: "board-uuid-1",
+          coluna_id: 12,
+          titulo: "Registrar horas da missão",
+          projeto: { id: 88, nome: "Sistema Secretaria" },
+          checklists: [],
+          horas: [],
+          anexos: [],
+        },
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/quadro/board-uuid-1/etiquetas") {
+      send(res, 200, {
+        error: false,
+        results: [{ id: 4, titulo: "Bug", cor: "#e74c3c" }],
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/quadro/board-uuid-1/membros") {
+      send(res, 200, {
+        error: false,
+        results: [{ id: 42, name: "Ada" }, { id: 7, name: "Linus" }],
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/quadro/board-uuid-1/clientes") {
+      send(res, 200, {
+        error: false,
+        results: [{ id: 15, nome: "Paysandu" }],
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/clientes") {
+      send(res, 200, {
+        error: false,
+        results: [{ id: 15, nome: "Paysandu" }],
+        meta: { total: 1, page: 1, per_page: 200 },
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/repositorios") {
+      send(res, 200, {
+        error: false,
+        results: [
+          {
+            id: 21,
+            full_name: "brediweb/b-ticket-backend",
+            name: "b-ticket-backend",
+            html_url: "https://github.com/brediweb/b-ticket-backend",
+          },
+        ],
+      });
+      return;
+    }
+
+    if (
+      req.method === "PUT" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/card-1"
+    ) {
+      const body = (await readJson(req)) as { data_prazo?: string; qtd_horas?: number };
+      send(res, 200, {
+        error: false,
+        messages: ["Card atualizado com sucesso."],
+        results: { id: "card-1", ...body },
+      });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/card-1/atividade"
+    ) {
+      const body = (await readJson(req)) as { descricao?: string };
+      send(res, 201, {
+        error: false,
+        results: { id: 55, descricao: body.descricao, comentario: true },
+      });
+      return;
+    }
+
+    if (
+      req.method === "PATCH" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/card-1/etiqueta/4/toggle"
+    ) {
+      send(res, 200, { error: false, messages: ["Sucesso!"], results: { id: "card-1" } });
+      return;
+    }
+
+    if (
+      req.method === "PATCH" &&
+      url.pathname === "/api/quadro/board-uuid-1/card/card-1/mover/6"
+    ) {
+      send(res, 200, {
+        error: false,
+        messages: ["Card movido com sucesso."],
+        results: { id: "card-1", coluna_id: 6 },
+      });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/card-1/anexo"
+    ) {
+      req.resume();
+      await new Promise<void>((resolve) => req.on("end", resolve));
+      send(res, 201, {
+        error: false,
+        results: { id: "anexo-uuid-2", nome: "nota.txt" },
+      });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/card-1/checklist"
+    ) {
+      const body = (await readJson(req)) as { titulo?: string };
+      send(res, 201, { error: false, results: { id: 3, titulo: body.titulo } });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      url.pathname === "/api/quadro/board-uuid-1/coluna/12/card/card-1/checklist/3/item"
+    ) {
+      const body = (await readJson(req)) as { descricao?: string };
+      send(res, 201, { error: false, results: { id: 8, descricao: body.descricao } });
+      return;
+    }
+
+    if (
+      req.method === "PATCH" &&
+      url.pathname ===
+        "/api/quadro/board-uuid-1/coluna/12/card/card-1/checklist/3/item/7/toggle"
+    ) {
+      send(res, 200, { error: false, results: { id: 7, concluido: true } });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/projeto/88/repositorios") {
+      const body = (await readJson(req)) as { repositorios?: unknown };
+      send(res, 201, { error: false, results: body.repositorios });
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/card_hora/9") {
+      send(res, 200, { error: false, messages: ["Hora deletada com sucesso."] });
+      return;
+    }
+
     send(res, 404, { message: "Not found" });
   });
 
@@ -344,15 +525,32 @@ describe("bticket-mcp smoke", () => {
     const listed = await mcpClient.listTools();
     const names = listed.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      "bticket_add_attachment",
+      "bticket_add_checklist",
+      "bticket_add_comment",
+      "bticket_add_hours",
       "bticket_create_card",
       "bticket_dashboard_stats",
+      "bticket_delete_attachment",
+      "bticket_delete_hours",
+      "bticket_get_card",
+      "bticket_link_repository",
       "bticket_list_boards",
       "bticket_list_cards",
+      "bticket_list_clients",
       "bticket_list_columns",
+      "bticket_list_labels",
+      "bticket_list_members",
       "bticket_list_my_open_cards",
       "bticket_list_notifications",
       "bticket_list_projects",
+      "bticket_list_repositories",
       "bticket_list_tickets",
+      "bticket_move_card",
+      "bticket_toggle_checklist_item",
+      "bticket_toggle_label",
+      "bticket_toggle_member",
+      "bticket_update_card",
       "bticket_whoami",
     ]);
 
@@ -398,6 +596,111 @@ describe("bticket-mcp smoke", () => {
         "PATCH /api/quadro/board-uuid-1/coluna/12/card/new-card-uuid/membro/42/toggle",
       ),
     );
+
+    await mcpClient.close();
+    await server.close();
+  });
+
+  it("updates card fields, hours, comment, label, attachment, checklist and repository", async () => {
+    const api = new BticketClient({
+      apiUrl: mock.url,
+      email: "user@example.com",
+      password: "secret",
+    });
+    const server = createMcpServer(api);
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    const mcpClient = new Client({ name: "smoke", version: "0.0.0" });
+    await Promise.all([server.connect(serverTransport), mcpClient.connect(clientTransport)]);
+
+    const got = await mcpClient.callTool({
+      name: "bticket_get_card",
+      arguments: { board_uuid: "board-uuid-1", card_uuid: "card-1" },
+    });
+    assert.equal(got.isError ?? false, false);
+    assert.match(JSON.stringify(got), /Corrigir login/);
+
+    const updated = await mcpClient.callTool({
+      name: "bticket_update_card",
+      arguments: {
+        board_uuid: "board-uuid-1",
+        card_uuid: "card-1",
+        data_prazo: "2026-09-20",
+        cliente: "Paysandu",
+      },
+    });
+    assert.equal(updated.isError ?? false, false);
+    assert.match(JSON.stringify(updated), /2026-09-20/);
+
+    const hours = await mcpClient.callTool({
+      name: "bticket_add_hours",
+      arguments: { board_uuid: "board-uuid-1", card_uuid: "card-1", qtd_horas: 1.5 },
+    });
+    assert.equal(hours.isError ?? false, false);
+
+    const comment = await mcpClient.callTool({
+      name: "bticket_add_comment",
+      arguments: {
+        board_uuid: "board-uuid-1",
+        card_uuid: "card-1",
+        descricao: "Ajustei o login e registrei o prazo.",
+      },
+    });
+    assert.equal(comment.isError ?? false, false);
+    assert.match(JSON.stringify(comment), /Ajustei o login/);
+
+    const label = await mcpClient.callTool({
+      name: "bticket_toggle_label",
+      arguments: { board_uuid: "board-uuid-1", card_uuid: "card-1", etiqueta: "Bug" },
+    });
+    assert.equal(label.isError ?? false, false);
+
+    const moved = await mcpClient.callTool({
+      name: "bticket_move_card",
+      arguments: { board_uuid: "board-uuid-1", card_uuid: "card-1", coluna: "Desenvolvimento" },
+    });
+    assert.equal(moved.isError ?? false, false);
+    assert.match(JSON.stringify(moved), /Desenvolvimento/);
+
+    const attachment = await mcpClient.callTool({
+      name: "bticket_add_attachment",
+      arguments: {
+        board_uuid: "board-uuid-1",
+        card_uuid: "card-1",
+        arquivo_nome: "nota.txt",
+        arquivo_base64: Buffer.from("hello").toString("base64"),
+      },
+    });
+    assert.equal(attachment.isError ?? false, false);
+    assert.match(JSON.stringify(attachment), /anexo-uuid-2/);
+
+    const checklist = await mcpClient.callTool({
+      name: "bticket_toggle_checklist_item",
+      arguments: {
+        board_uuid: "board-uuid-1",
+        card_uuid: "card-1",
+        checklist: "QA",
+        item: "Testar login",
+      },
+    });
+    assert.equal(checklist.isError ?? false, false);
+
+    const repo = await mcpClient.callTool({
+      name: "bticket_link_repository",
+      arguments: {
+        board_uuid: "board-uuid-1",
+        card_uuid: "card-1",
+        repositorio: "b-ticket-backend",
+        papel: "backend",
+      },
+    });
+    assert.equal(repo.isError ?? false, false);
+    assert.match(JSON.stringify(repo), /b-ticket-backend/);
+
+    const clients = await mcpClient.callTool({
+      name: "bticket_list_clients",
+      arguments: { board_uuid: "board-uuid-1" },
+    });
+    assert.match(JSON.stringify(clients), /Paysandu/);
 
     await mcpClient.close();
     await server.close();

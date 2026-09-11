@@ -1,8 +1,8 @@
 # bticket-mcp
 
-Servidor MCP fino que expõe a API Laravel Sanctum do [B-Ticket](https://github.com/brediweb/b-ticket-backend) como ferramentas. O Cursor (e o Grok Bot) passam a consultar usuário, quadros, cards, tickets, dashboard e notificações — e também **criar card com horas** — sem inventar rotas.
+Servidor MCP fino que expõe a API Laravel Sanctum do [B-Ticket](https://github.com/brediweb/b-ticket-backend) como ferramentas. O Cursor (e o Grok Bot) passam a consultar o B-Ticket **e operar um card por completo** — horas, comentário, prazo, etiqueta, cliente, projeto, anexo, repositório, checklist e coluna — sem inventar rotas.
 
-A maior parte das tools é **somente leitura**. `bticket_create_card` é a tool de escrita: cria o card, lança horas e se atribui ao card.
+As tools de leitura listam contexto. As tools `bticket_*` de escrita cobrem o ciclo de vida do card. Quadro, projeto, cliente, coluna, etiqueta, membro e repositório aceitam **nome** (não só id).
 
 ## O que este servidor faz
 
@@ -12,12 +12,29 @@ A maior parte das tools é **somente leitura**. `bticket_create_card` é a tool 
 | `bticket_list_boards` | `GET /api/quadros` |
 | `bticket_list_cards` | `GET /api/quadro/{uuid}/cards` ou `/cards/concluidos` |
 | `bticket_list_my_open_cards` | `GET /api/user` + cards filtrados por `membro_id` |
+| `bticket_get_card` | `GET /api/quadro/{uuid}/card/{uuid}` (card completo) |
 | `bticket_list_tickets` | `GET /api/tickets` |
 | `bticket_dashboard_stats` | `GET /api/dashboard/estatisticas` e `GET /api/dashboard/relatorio-diario-equipe` |
 | `bticket_list_notifications` | `GET /api/notificacoes` e `GET /api/notificacoes/contagem` |
 | `bticket_list_projects` | `GET /api/projetos` |
+| `bticket_list_clients` | `GET /api/clientes` ou `GET /api/quadro/{uuid}/clientes` |
 | `bticket_list_columns` | `GET /api/quadro/{uuid}/colunas` |
-| `bticket_create_card` | `POST .../coluna/{id}/card` + `PUT` horas + `PATCH` membro |
+| `bticket_list_labels` | `GET /api/quadro/{uuid}/etiquetas` |
+| `bticket_list_members` | `GET /api/quadro/{uuid}/membros` |
+| `bticket_list_repositories` | `GET /api/repositorios` |
+| `bticket_create_card` | `POST .../card` + horas, membro, etiquetas e comentário opcionais |
+| `bticket_update_card` | `PUT .../card/{uuid}` (título, prazo, cliente, projeto, horas, etc.) |
+| `bticket_add_hours` | `PUT` com `qtd_horas` (cria um lançamento em `card_horas`) |
+| `bticket_delete_hours` | `DELETE /api/card_hora/{id}` |
+| `bticket_add_comment` | `POST/PUT/DELETE .../atividade` |
+| `bticket_toggle_label` | `PATCH .../etiqueta/{id}/toggle` (cria a etiqueta no quadro se `criar=true`) |
+| `bticket_toggle_member` | `PATCH .../membro/{user}/toggle` |
+| `bticket_move_card` | `PATCH /api/quadro/{uuid}/card/{uuid}/mover/{coluna_id}` |
+| `bticket_add_attachment` | `POST` multipart `.../anexo` (`arquivo`) |
+| `bticket_delete_attachment` | `DELETE .../anexo/{uuid}` |
+| `bticket_add_checklist` | `POST .../checklist` e `POST .../item` |
+| `bticket_toggle_checklist_item` | `PATCH .../item/{id}/toggle` |
+| `bticket_link_repository` | `POST /api/projeto/{id}/repositorios` (vínculo no **projeto** do card) |
 
 `bticket_list_my_open_cards` **prefere** `board_uuid`. Sem o UUID, lista os quadros e agrega até 8 boards — isso é mais pesado e deve ser evitado no dia a dia.
 
@@ -110,7 +127,7 @@ Equivalente com token estático:
 }
 ```
 
-Reinicie o MCP no Cursor. Em **Output → MCP Logs** você deve ver a sessão stdio e as 10 tools.
+Reinicie o MCP no Cursor. Em **Output → MCP Logs** você deve ver a sessão stdio e as tools `bticket_*` (leitura + operação completa do card).
 
 Não use `console.log` no processo stdio: stdout é o protocolo MCP. Logs vão para stderr.
 
@@ -181,24 +198,43 @@ npm test
 npm run build
 ```
 
-O smoke sobe um HTTP mock no estilo `apiResponse` do B-Ticket, valida login + cache de token, paths reais, as tools de leitura e a criação de card (horas + membro) via transporte in-memory do SDK.
+O smoke sobe um HTTP mock no estilo `apiResponse` do B-Ticket, valida login + cache de token, paths reais, as tools de leitura e a operação do card (horas, comentário, etiqueta, anexo, checklist, repositório) via transporte in-memory do SDK.
 
-## Criar card e lançar horas
+## Operar um card
+
+Quase todas as tools de escrita pedem `card_uuid` + `board_uuid` (ou `board` pelo nome). A coluna é lida automaticamente em `GET /quadro/{uuid}/card/{uuid}`.
+
+### Criar e registrar o que foi feito
 
 Use `bticket_create_card` no final de uma missão, por exemplo:
 
 > faça isso na tarefa X, projeto Sistema Secretaria, e depois crie um card para registrar 2 horas e o que foi feito
 
-A tool resolve quadro/projeto/coluna **por nome**. Campos principais:
+Campos principais:
 
 - `titulo` — obrigatório
 - `descricao` — texto puro (sem HTML) com o pedido e o que foi feito
 - `qtd_horas` — lança na API via `PUT` `qtd_horas` (não manda hora no POST de criação)
-- `projeto` ou `projeto_id`
-- `board_uuid` ou `board` (se só existir um quadro, usa ele)
-- `coluna` ou `coluna_id` — se houver horas e a coluna não for informada, cai em **Concluído**
+- `projeto` / `cliente` / `board` / `coluna` — por nome ou id
+- `data_prazo`, `data_inicio`, `data_entrega` — `YYYY-MM-DD`
+- `etiqueta` — aplica (e cria no quadro se ainda não existir)
+- `comentario` — comentário inicial
+- `atribuir_a_mim` — ligado por padrão
 
-`atribuir_a_mim` vem ligado por padrão.
+### Atualizar um card existente
+
+- `bticket_get_card` — lê o card completo (horas, comentários, anexos, etiquetas, checklists, projeto)
+- `bticket_update_card` — prazo, cliente, projeto, título, descrição, datas, arquivar
+- `bticket_add_hours` / `bticket_delete_hours` — lançamentos de `card_horas`
+- `bticket_add_comment` — criar, editar (`comentario_id`) ou excluir (`excluir=true`)
+- `bticket_toggle_label` / `bticket_toggle_member` — liga/desliga
+- `bticket_move_card` — muda de coluna pelo nome (ex.: `Desenvolvimento`, `Concluído`)
+- `bticket_add_attachment` — `arquivo_caminho` no disco **ou** `arquivo_base64` + `arquivo_nome`
+- `bticket_add_checklist` / `bticket_toggle_checklist_item`
+
+### Repositório
+
+O card **não** tem `repositorio_id`. O vínculo GitHub é no **projeto** (`POST /api/projeto/{id}/repositorios`). Use `bticket_list_repositories` para buscar e `bticket_link_repository` com `projeto` ou `card_uuid` (herda o projeto do card).
 
 ## Segurança
 

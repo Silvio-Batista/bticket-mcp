@@ -155,6 +155,77 @@ export function pickColumn(
   return columns[0];
 }
 
+export function namedItemsFromPayload(
+  payload: unknown,
+  titleKeys: string[] = ["titulo", "nome", "name", "full_name"],
+): NamedItem[] {
+  return extractArray(payload).flatMap((item) => {
+    const record = asRecord(item);
+    if (!record) {
+      return [];
+    }
+    const id = record.id ?? record.uuid;
+    if (id === undefined || id === null) {
+      return [];
+    }
+    let titulo = "";
+    for (const key of titleKeys) {
+      const value = record[key];
+      if (typeof value === "string" && value.trim()) {
+        titulo = value.trim();
+        break;
+      }
+    }
+    return [{ id: String(id), titulo, extra: record }];
+  });
+}
+
+export function pickByIdOrName(
+  items: NamedItem[],
+  id: string | undefined,
+  name: string | undefined,
+  label: string,
+): NamedItem {
+  if (id) {
+    const match = items.find((item) => item.id === String(id));
+    if (!match) {
+      throw new BticketApiError(
+        `${label} id ${id} não encontrado. Opções: ${items
+          .slice(0, 12)
+          .map((item) => `${item.titulo} (${item.id})`)
+          .join("; ")}`,
+        404,
+        items,
+      );
+    }
+    return match;
+  }
+  if (name) {
+    return pickByName(items, name, label);
+  }
+  throw new BticketApiError(`Informe ${label.toLowerCase()} (id ou nome).`, 400, items);
+}
+
+export function toApiId(value: string): string | number {
+  return /^\d+$/.test(value) ? Number(value) : value;
+}
+
+export function labelsFromPayload(payload: unknown): NamedItem[] {
+  return namedItemsFromPayload(payload, ["titulo", "nome"]);
+}
+
+export function clientsFromPayload(payload: unknown): NamedItem[] {
+  return namedItemsFromPayload(payload, ["nome", "titulo", "name"]);
+}
+
+export function membersFromPayload(payload: unknown): NamedItem[] {
+  return namedItemsFromPayload(payload, ["name", "nome", "titulo"]);
+}
+
+export function repositoriesFromPayload(payload: unknown): NamedItem[] {
+  return namedItemsFromPayload(payload, ["full_name", "name", "titulo"]);
+}
+
 export function pickBoard(
   boards: NamedItem[],
   boardUuid?: string,

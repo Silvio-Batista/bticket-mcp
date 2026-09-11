@@ -7,36 +7,27 @@ import {
   extractCardUuid,
   extractUserId,
 } from "./bticket/errors.js";
-import {
-  boardsFromPayload,
-  pickBoard,
-  pickByName,
-  pickColumn,
-  columnsFromPayload,
-  projectsFromPayload,
-} from "./bticket/resolve.js";
+import { columnsFromPayload, pickColumn, projectsFromPayload, toApiId } from "./bticket/resolve.js";
 import type { CardFilters } from "./bticket/types.js";
+import { registerCardTools } from "./card-tools.js";
+import {
+  cardFieldBody,
+  resolveBoard,
+  resolveLabel,
+  resolveProjectAndClient,
+} from "./card-context.js";
+import {
+  booleanish,
+  errorResult,
+  idList,
+  jsonResult,
+  readOnly,
+  stringList,
+  writeOnce,
+} from "./mcp-util.js";
 
 export const SERVER_NAME = "bticket-mcp";
-export const SERVER_VERSION = "1.1.0";
-
-const booleanish = z
-  .union([z.boolean(), z.enum(["true", "false", "1", "0"])])
-  .optional()
-  .transform((value) => {
-    if (value === undefined) {
-      return undefined;
-    }
-    if (typeof value === "boolean") {
-      return value;
-    }
-    return value === "true" || value === "1";
-  });
-
-const idList = z
-  .union([z.string(), z.array(z.string())])
-  .optional()
-  .describe("ID único ou lista (OR dentro do mesmo filtro)");
+export const SERVER_VERSION = "1.2.0";
 
 const cardFilterShape = {
   busca: z.string().optional().describe("Busca textual em título, descrição, cliente e projeto"),
@@ -88,50 +79,6 @@ function toFilters(args: {
     per_page: args.per_page,
   };
 }
-
-function jsonResult(data: unknown) {
-  return {
-    content: [
-      {
-        type: "text" as const,
-        text: JSON.stringify(data, null, 2),
-      },
-    ],
-  };
-}
-
-function errorResult(error: unknown) {
-  if (error instanceof BticketApiError) {
-    return {
-      isError: true,
-      content: [
-        {
-          type: "text" as const,
-          text: error.message,
-        },
-      ],
-    };
-  }
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    isError: true,
-    content: [{ type: "text" as const, text: message }],
-  };
-}
-
-const readOnly = {
-  readOnlyHint: true,
-  destructiveHint: false,
-  idempotentHint: true,
-  openWorldHint: true,
-} as const;
-
-const writeOnce = {
-  readOnlyHint: false,
-  destructiveHint: false,
-  idempotentHint: false,
-  openWorldHint: true,
-} as const;
 
 export function createMcpServer(client: BticketClient): McpServer {
   const server = new McpServer(
@@ -404,41 +351,40 @@ export function createMcpServer(client: BticketClient): McpServer {
   server.registerTool(
     "bticket_create_card",
     {
-      title: "Criar card e registrar horas",
+      title: "Criar card completo",
       description:
-        "Cria um card no B-Ticket para registrar o que foi feito e as horas trabalhadas. Aceita projeto/quadro/coluna por nome (não precisa do id). Fluxo: POST /coluna/{id}/card, opcionalmente PUT com qtd_horas e PATCH para se atribuir ao card. Descrição em texto puro, sem HTML. Se informar qtd_horas e não passar coluna, usa a coluna de Concluído.",
+        "Cria um card no B-Ticket. Aceita quadro/projeto/coluna/cliente por nome. Fluxo: POST /coluna/{id}/card, opcionalmente PUT qtd_horas, PATCH membro, PATCH etiquetas e POST comentário. Descrição em texto puro. Se informar qtd_horas e não passar coluna, usa a coluna de Concluído.",
       inputSchema: z.object({
         titulo: z.string().min(1).describe("Título do card"),
         descricao: z
           .string()
           .optional()
           .describe("O que foi pedido e o que foi feito, em texto puro (sem HTML)"),
-        qtd_horas: z
-          .coerce
-          .number()
-          .positive()
-          .optional()
-          .describe("Horas trabalhadas. Lançadas depois da criação via PUT qtd_horas"),
+        qtd_horas: z.coerce.number().positive().optional().describe("Horas trabalhadas (PUT após criar)"),
         board_uuid: z.string().optional().describe("UUID do quadro. Preferível se já conhecido"),
         board: z.string().optional().describe("Nome do quadro, se não passar board_uuid"),
         projeto_id: z.string().optional().describe("Id numérico do projeto"),
         projeto: z.string().optional().describe("Nome do projeto, ex.: Sistema Secretaria"),
         cliente_id: z.string().optional().describe("Id numérico do cliente. Se omitido, herda do projeto"),
+        cliente: z.string().optional().describe("Nome do cliente"),
         coluna_id: z.string().optional().describe("Id numérico da coluna"),
         coluna: z
           .string()
           .optional()
           .describe("Nome da coluna. Default: Concluído se houver horas, senão Desenvolvimento"),
         data_prazo: z.string().optional().describe("YYYY-MM-DD"),
+        data_inicio: z.string().optional().describe("YYYY-MM-DD"),
+        data_entrega: z.string().optional().describe("YYYY-MM-DD"),
+        etiqueta: stringList.describe("Nome(s) de etiqueta para aplicar após criar"),
+        etiqueta_id: stringList.describe("Id(s) de etiqueta para aplicar após criar"),
+        comentario: z.string().optional().describe("Comentário inicial no card"),
         atribuir_a_mim: booleanish.describe("true (default) atribui o usuário autenticado ao card"),
       }),
       annotations: writeOnce,
     },
     async (args) => {
       try {
-        const boardsPayload = await client.listBoards();
-        const board = pickBoard(boardsFromPayload(boardsPayload), args.board_uuid, args.board);
-
+        const board = await resolveBoard(client, args.board_uuid, args.board);
         const columnsPayload = await client.listColumns(board.id);
         const column = pickColumn(
           columnsFromPayload(columnsPayload),
@@ -447,50 +393,23 @@ export function createMcpServer(client: BticketClient): McpServer {
           Boolean(args.qtd_horas),
         );
 
-        let projetoId = args.projeto_id;
-        let clienteId = args.cliente_id;
-        let projetoNome: string | undefined;
+        const refs = await resolveProjectAndClient(client, {
+          projeto_id: args.projeto_id,
+          projeto: args.projeto,
+          cliente_id: args.cliente_id,
+          cliente: args.cliente,
+          boardUuid: board.id,
+        });
 
-        if (args.projeto || args.projeto_id) {
-          const projectsPayload = await client.listProjects({ per_page: 500, page: 1 });
-          const projects = projectsFromPayload(projectsPayload);
-
-          const chosen = args.projeto_id
-            ? projects.find((item) => item.id === String(args.projeto_id))
-            : pickByName(projects, args.projeto ?? "", "Projeto");
-
-          if (args.projeto_id && !chosen) {
-            throw new BticketApiError(
-              `Projeto id ${args.projeto_id} não encontrado. Use bticket_list_projects para buscar pelo nome.`,
-              404,
-              projects.slice(0, 20),
-            );
-          }
-
-          if (chosen) {
-            projetoId = chosen.id;
-            projetoNome = chosen.titulo;
-            if (!clienteId && chosen.extra?.cliente_id != null) {
-              clienteId = String(chosen.extra.cliente_id);
-            }
-          }
-        }
-
-        const createBody: Record<string, unknown> = {
+        const createBody = cardFieldBody({
           titulo: args.titulo,
-        };
-        if (args.descricao !== undefined) {
-          createBody.descricao = args.descricao;
-        }
-        if (projetoId) {
-          createBody.projeto_id = Number(projetoId) || projetoId;
-        }
-        if (clienteId) {
-          createBody.cliente_id = Number(clienteId) || clienteId;
-        }
-        if (args.data_prazo) {
-          createBody.data_prazo = args.data_prazo;
-        }
+          descricao: args.descricao,
+          projeto_id: refs.projetoId,
+          cliente_id: refs.clienteId,
+          data_prazo: args.data_prazo,
+          data_inicio: args.data_inicio,
+          data_entrega: args.data_entrega,
+        });
 
         const created = await client.createCard(board.id, column.id, createBody);
         const cardUuid = extractCardUuid(created);
@@ -505,6 +424,8 @@ export function createMcpServer(client: BticketClient): McpServer {
         const warnings: string[] = [];
         let horas: unknown;
         let membro: unknown;
+        let comentario: unknown;
+        const etiquetas: unknown[] = [];
 
         if (args.qtd_horas) {
           horas = await client.updateCard(board.id, column.id, cardUuid, {
@@ -522,23 +443,52 @@ export function createMcpServer(client: BticketClient): McpServer {
           }
         }
 
+        const etiquetaIds = args.etiqueta_id ?? [];
+        const etiquetaNomes = args.etiqueta ?? [];
+        for (const id of etiquetaIds) {
+          etiquetas.push(await client.toggleCardLabel(board.id, column.id, cardUuid, toApiId(id)));
+        }
+        for (const nome of etiquetaNomes) {
+          try {
+            const label = await resolveLabel(client, board.id, undefined, nome, {
+              createIfMissing: true,
+            });
+            etiquetas.push(
+              await client.toggleCardLabel(board.id, column.id, cardUuid, toApiId(label.id)),
+            );
+          } catch (error) {
+            warnings.push(error instanceof Error ? error.message : String(error));
+          }
+        }
+
+        if (args.comentario?.trim()) {
+          comentario = await client.addCardComment(board.id, column.id, cardUuid, {
+            descricao: args.comentario,
+          });
+        }
+
         return jsonResult({
           ok: true,
           board: { uuid: board.id, titulo: board.titulo },
           coluna: { id: column.id, titulo: column.titulo },
-          projeto: projetoId ? { id: projetoId, nome: projetoNome } : null,
+          projeto: refs.projetoId ? { id: refs.projetoId, nome: refs.projetoNome } : null,
+          cliente: refs.clienteId ? { id: refs.clienteId, nome: refs.clienteNome } : null,
           card_uuid: cardUuid,
           qtd_horas: args.qtd_horas ?? null,
           warnings,
           created,
           horas: horas ?? null,
           membro: membro ?? null,
+          etiquetas,
+          comentario: comentario ?? null,
         });
       } catch (error) {
         return errorResult(error);
       }
     },
   );
+
+  registerCardTools(server, client);
 
   return server;
 }
